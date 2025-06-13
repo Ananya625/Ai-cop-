@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Smart Safety Detection</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      text-align: center;
+      background-color: #e6f2ff;
+      padding-top: 30px;
+    }
+    
+    #label-container {
+      font-size: 18px;
+      margin-top: 20px;
+      color: #003366;
+      font-weight: bold;
+      min-height: 80px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    button {
+      margin-top: 20px;
+      padding: 12px 20px;
+      font-size: 16px;
+      background-color: #004080;
+      color: white;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    button:disabled {
+      background-color: #cccccc;
+      cursor: not-allowed;
+    }
+    .status {
+      margin: 5px 0;
+      padding: 5px;
+      border-radius: 4px;
+    }
+    .loading {
+      color:red;
+    }
+    .detection {
+      color: #003366;
+    }
+    #D1{
+      position: absolute;
+      bottom:5px;
+      color: black;
+    }
+    #D2{
+      position: absolute;
+      bottom: 30px;
+      color: black;
+    }
+
+  </style>
+</head>
+<body>
+  <H1><B>SMART SAFETY DETECTION</B></H1>
+  <h1>Helmet and Seatbelt Detection Using AI COPS</h1>
+  <H3 id="D1">#TAKE SAFETY MEASURE</H3>
+  <H3 id="D2">#SAVE LIVES </H3>
+  
+
+  
+  <video id="webcam" autoplay playsinline muted></video>
+  <div id="webcam-container"></div>
+  <div id="label-container">Click Start to begin detection</div>
+  <button id="startBtn" onclick="startAll()">Start Detection</button>
+
+  <!-- TensorFlow.js and Teachable Machine scripts -->
+  <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+  
+  <script type="text/javascript">
+    const modelURLs = {
+      vehicle: "https://teachablemachine.withgoogle.com/models/GeYo-iNgh/",
+      helmet: "https://teachablemachine.withgoogle.com/models/UTeBv-7Om/",
+      seatbelt: "https://teachablemachine.withgoogle.com/models/a8rjNS_Ej/"
+    };
+
+    let modelVehicle, modelHelmet, modelSeatbelt;
+    let webcam, labelContainer;
+    let isRunning = false;
+    let predictionInterval;
+
+    async function loadModel(url) {
+      try {
+        const modelURL = url + "model.json";
+        const metadataURL = url + "metadata.json";
+        return await tmImage.load(modelURL, metadataURL);
+      } catch (error) {
+        console.error('Error loading model:', error);
+        throw error;
+      }
+    }
+
+    async function startAll() {
+      if (isRunning) return;
+      
+      const startBtn = document.getElementById('startBtn');
+      startBtn.disabled = true;
+      startBtn.textContent = 'Loading...';
+      
+      labelContainer = document.getElementById("label-container");
+      labelContainer.innerHTML = '<div class="loading">Loading models...</div>';
+
+      try {
+        // Load all models with error handling
+        labelContainer.innerHTML = '<div class="loading">Loading vehicle detection model...</div>';
+        modelVehicle = await loadModel(modelURLs.vehicle);
+        
+        labelContainer.innerHTML = '<div class="loading">Loading helmet detection model...</div>';
+        modelHelmet = await loadModel(modelURLs.helmet);
+        
+        labelContainer.innerHTML = '<div class="loading">Loading seatbelt detection model...</div>';
+        modelSeatbelt = await loadModel(modelURLs.seatbelt);
+
+        // Setup webcam
+        labelContainer.innerHTML = '<div class="loading">Setting up camera...</div>';
+        const flip = true;
+        webcam = new tmImage.Webcam(320, 240, flip);
+        await webcam.setup();
+        await webcam.play();
+
+        document.getElementById("webcam-container").appendChild(webcam.canvas);
+        
+        isRunning = true;
+        startBtn.textContent = 'Stop Detection';
+        startBtn.disabled = false;
+        startBtn.onclick = stopDetection;
+        
+        // Start prediction loop with controlled intervals
+        startPredictionLoop();
+        
+      } catch (error) {
+        console.error('Error starting detection:', error);
+        labelContainer.innerHTML = '<div style="color: red;">Error: Could not start detection</div>';
+        startBtn.disabled = false;
+        startBtn.textContent = 'Start Detection';
+      }
+    }
+
+    function startPredictionLoop() {
+      // Use setInterval instead of requestAnimationFrame for better control
+      predictionInterval = setInterval(async () => {
+        if (isRunning && webcam) {
+          webcam.update();
+          await predict();
+        }
+      }, 500); // Predict every 500ms instead of every frame
+    }
+
+    function stopDetection() {
+      isRunning = false;
+      if (predictionInterval) {
+        clearInterval(predictionInterval);
+      }
+      if (webcam) {
+        webcam.stop();
+      }
+      
+      const startBtn = document.getElementById('startBtn');
+      startBtn.textContent = 'Start Detection';
+      startBtn.onclick = startAll;
+      
+      labelContainer.innerHTML = 'Detection stopped. Click Start to begin again.';
+    }
+
+    async function predict() {
+      try {
+        // Vehicle detection
+        const predictionsVehicle = await modelVehicle.predict(webcam.canvas);
+        const vehiclePred = predictionsVehicle.sort((a, b) => b.probability - a.probability)[0];
+        
+        let displayText = `<div class="status detection">Vehicle: ${vehiclePred.className} (${(vehiclePred.probability * 100).toFixed(1)}%)</div>`;
+
+        // Only proceed with specific detections if confidence is high
+        if (vehiclePred.probability > 0.7) {
+          if (vehiclePred.className.toLowerCase().includes("2") || vehiclePred.className.toLowerCase().includes("bike") || vehiclePred.className.toLowerCase().includes("motorcycle")) {
+            // Helmet detection for 2-wheelers
+            const helmetPredictions = await modelHelmet.predict(webcam.canvas);
+            const helmetPred = helmetPredictions.sort((a, b) => b.probability - a.probability)[0];
+            displayText += `<div class="status detection">Helmet: ${helmetPred.className} (${(helmetPred.probability * 100).toFixed(1)}%)</div>`;
+            
+          } else if (vehiclePred.className.toLowerCase().includes("4") || vehiclePred.className.toLowerCase().includes("car")) {
+            // Seatbelt detection for 4-wheelers
+            const seatbeltPredictions = await modelSeatbelt.predict(webcam.canvas);
+            const seatbeltPred = seatbeltPredictions.sort((a, b) => b.probability - a.probability)[0];
+            displayText += `<div class="status detection">Seatbelt: ${seatbeltPred.className} (${(seatbeltPred.probability * 100).toFixed(1)}%)</div>`;
+          }
+        }
+
+        labelContainer.innerHTML = displayText;
+        
+      } catch (error) {
+        console.error('Prediction error:', error);
+        labelContainer.innerHTML = '<div style="color: red;">Prediction error occurred</div>';
+      }
+    }
+  </script>
+</body>
+</html>
